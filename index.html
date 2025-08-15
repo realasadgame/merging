@@ -996,23 +996,35 @@
                 showLoader('Merging PDFs...');
                 await new Promise(resolve => setTimeout(resolve, 500));
                 try {
-                    const { PDFDocument } = window.PDFLib; const mergedPdf = await PDFDocument.create();
+                    const { PDFDocument, degrees } = window.PDFLib;
+                    const mergedPdf = await PDFDocument.create();
                     for (const fileObject of filesData) {
                         const arrayBuffer = await fileObject.file.arrayBuffer();
-                        const pdfToMerge = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true, password: fileObject.password });
+                        let pdfToMerge;
+                        try {
+                            // PDF-Lib does NOT support password-protected PDFs
+                            pdfToMerge = await PDFDocument.load(arrayBuffer);
+                        } catch (e) {
+                            showMessage(`Could not merge '${fileObject.file.name}'. Password-protected or corrupted.`);
+                            continue;
+                        }
                         const copiedPages = await mergedPdf.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
                         copiedPages.forEach((page, pageIndex) => {
-                            const rotationKey = ${fileObject.file.name}-${pageIndex + 1}; const rotation = pageRotations[rotationKey] || 0;
-                            if (rotation !== 0) page.setRotation(window.PDFLib.degrees(rotation));
+                            const rotationKey = `${fileObject.file.name}-${pageIndex + 1}`;
+                            const rotation = pageRotations[rotationKey] || 0;
+                            if (rotation !== 0) page.setRotation(degrees(rotation));
                             mergedPdf.addPage(page);
                         });
                     }
-                    const mergedPdfBytes = await mergedPdf.save(); window.mergedPdfBlob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+                    const mergedPdfBytes = await mergedPdf.save();
+                    window.mergedPdfBlob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
                     showScreen(elements.postMergeScreen);
                 } catch (error) {
                     console.error(error);
-                    showMessage('Merge failed. A file might be corrupted or have an incorrect password.');
-                } finally { hideLoader(); }
+                    showMessage('Merge failed. A file might be corrupted or password-protected.');
+                } finally {
+                    hideLoader();
+                }
             };
 
             // --- Event Listeners ---
