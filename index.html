@@ -698,10 +698,12 @@
 </head>
 
 <body>
+    <!-- Loading overlay for general processing -->
     <div id="loading-overlay" class="loader-overlay">
         <div class="loading-spinner"></div>
         <p id="loading-text">Processing...</p>
     </div>
+    <!-- Loading overlay specifically for file "upload" simulation -->
     <div id="upload-progress-overlay" class="loader-overlay">
         <p id="upload-status-text"></p>
         <p id="upload-filename-text" style="font-size: 0.9rem;"></p>
@@ -712,6 +714,7 @@
         <p id="upload-label">UPLOADED</p>
     </div>
 
+    <!-- Initial screen for selecting files -->
     <div id="initial-screen" class="initial-screen">
         <header class="app-header">
             <h1>Merge PDF files</h1>
@@ -723,6 +726,7 @@
         </div>
     </div>
 
+    <!-- Main screen for arranging and merging files -->
     <div id="file-selection-screen" class="file-selection-screen">
         <div class="left-panel">
             <div id="file-list" class="file-list"></div>
@@ -743,6 +747,7 @@
     </div>
     <button class="merge-btn merge-btn-mobile" id="mergeBtnMobile" disabled><span>Merge PDF</span></button>
 
+    <!-- Screen shown after the merge is complete -->
     <div id="post-merge-screen" class="post-merge-screen">
         <header class="app-header">
             <h1>PDFs have been merged!</h1>
@@ -784,21 +789,29 @@
         </div>
     </div>
 
+    <!-- Universal message box for errors and info -->
     <div id="message-box" class="message-box"></div>
+    <!-- Overlay for mobile right panel -->
     <div id="right-panel-overlay"></div>
 
+    <!-- Modal for viewing a single PDF -->
     <div id="pdf-viewer-modal" class="pdf-viewer-modal">
         <button id="pdf-viewer-close" class="pdf-viewer-close">&times;</button>
         <iframe id="pdf-viewer-iframe" frameborder="0"></iframe>
     </div>
 
+    <!-- External Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    
+    <!-- Main Application Logic -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Set up the worker for PDF.js to render previews
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
+            // Cache all necessary DOM elements for quick access
             const elements = {
                 initialScreen: document.getElementById('initial-screen'), fileSelectionScreen: document.getElementById('file-selection-screen'),
                 postMergeScreen: document.getElementById('post-merge-screen'), dropArea: document.getElementById('drop-area'),
@@ -820,10 +833,18 @@
                 pdfViewerClose: document.getElementById('pdf-viewer-close'),
             };
 
+            // Create a hidden file input to trigger file selection dialog
             const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = 'application/pdf'; fileInput.multiple = true; fileInput.style.display = 'none'; document.body.appendChild(fileInput);
 
-            let filesData = []; let pageRotations = {}; let fileIdCounter = 0; let currentViewerUrl = null;
+            // State management variables
+            let filesData = []; // Stores objects of {id, file, password}
+            let pageRotations = {}; // Stores rotation degrees for each page of each file
+            let fileIdCounter = 0; // Ensures each file has a unique ID
+            let currentViewerUrl = null; // Holds the blob URL for the PDF viewer to revoke it later
 
+            // --- UI Control Functions ---
+
+            // Switches between the three main screens of the application
             const showScreen = (screen) => {
                 elements.initialScreen.style.display = 'none'; elements.fileSelectionScreen.style.display = 'none'; elements.postMergeScreen.style.display = 'none';
 
@@ -833,10 +854,13 @@
                 updateMergeButtonState();
             };
 
+            // Shows a loading spinner with custom text
             const showLoader = (text) => { elements.loadingText.textContent = text; elements.loadingOverlay.style.display = 'flex'; };
             const hideLoader = () => { elements.loadingOverlay.style.display = 'none'; };
+            // Displays a temporary message at the top of the screen
             const showMessage = (text) => { elements.messageBox.textContent = text; elements.messageBox.style.display = 'block'; setTimeout(() => { elements.messageBox.style.display = 'none'; }, 4000); };
 
+            // Enables/disables the merge button based on the number of files
             const updateMergeButtonState = () => {
                 const disabled = filesData.length < 2;
                 elements.mergeBtn.disabled = disabled;
@@ -849,13 +873,17 @@
                 }
             };
 
+            // Resets the application to its initial state
             const resetApp = () => {
                 filesData = []; pageRotations = {}; fileIdCounter = 0;
                 elements.fileList.innerHTML = ''; window.mergedPdfBlob = null;
                 showScreen(elements.initialScreen);
-                toggleRightPanel(true);
+                toggleRightPanel(true); // Ensure mobile panel is closed
             };
 
+            // --- File Handling Functions ---
+
+            // Processes a single file: checks for password, creates a file object, and adds it to the list
             const processAndAddFile = async (file) => {
                 try {
                     const arrayBuffer = await file.arrayBuffer();
@@ -863,14 +891,16 @@
                     let password = null;
 
                     try {
+                        // First attempt to open without a password
                         pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
                     } catch (e) {
                         if (e.name === 'PasswordException') {
+                            // If it's password-protected, prompt the user until they provide the correct one or cancel
                             let correctPasswordFound = false;
                             while (!correctPasswordFound) {
-                                const userPassword = prompt(PDF '${file.name}' is password protected. Please enter the password:);
-                                if (userPassword === null) {
-                                    showMessage('${file.name}' was not added because it is password protected.);
+                                const userPassword = prompt(`PDF '${file.name}' is password protected. Please enter the password:`);
+                                if (userPassword === null) { // User cancelled the prompt
+                                    showMessage(`'${file.name}' was not added because it is password protected.`);
                                     return;
                                 }
                                 try {
@@ -881,12 +911,12 @@
                                     if (e2.name === 'InvalidPasswordException') {
                                         alert('Wrong password. Please try again.');
                                     } else {
-                                        throw e2;
+                                        throw e2; // Some other error occurred
                                     }
                                 }
                             }
                         } else {
-                            throw e;
+                            throw e; // A different error occurred (e.g., corrupted file)
                         }
                     }
 
@@ -895,20 +925,21 @@
                     renderFileBox(fileObject);
 
                 } catch (error) {
-                    console.error(Failed to process ${file.name}:, error);
-                    showMessage(Could not process '${file.name}'. The file may be invalid or corrupted.);
+                    console.error(`Failed to process ${file.name}:`, error);
+                    showMessage(`Could not process '${file.name}'. The file may be invalid or corrupted.`);
                 }
             };
 
+            // Takes a list of files, filters them, and processes each valid one
             const addFilesToList = async (files) => {
                 const newFiles = Array.from(files).filter(file => {
-                    if (file.type !== 'application/pdf') { showMessage('${file.name}' is not a PDF.); return false; }
-                    if (filesData.some(f => f.file.name === file.name)) { showMessage('${file.name}' is already added.); return false; }
+                    if (file.type !== 'application/pdf') { showMessage(`'${file.name}' is not a PDF.`); return false; }
+                    if (filesData.some(f => f.file.name === file.name)) { showMessage(`'${file.name}' is already added.`); return false; }
                     return true;
                 });
 
                 if (newFiles.length === 0) {
-                    fileInput.value = '';
+                    fileInput.value = ''; // Clear input to allow re-selecting the same file if needed
                     return;
                 }
 
@@ -922,15 +953,16 @@
                     showScreen(elements.fileSelectionScreen);
                 }
                 updateMergeButtonState();
-                fileInput.value = '';
+                fileInput.value = ''; // Clear input
             };
 
+            // Creates the DOM element (card) for a file and renders its preview
             const renderFileBox = (fileObject) => {
                 const fileBox = document.createElement('div');
                 fileBox.className = 'file-box'; fileBox.dataset.id = fileObject.id;
                 fileBox.innerHTML = `
                 <canvas></canvas> <p title="${fileObject.file.name}">${fileObject.file.name}</p>
-                <button class="rotate-btn action-btn" title="Rotate Document"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1  14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+                <button class="rotate-btn action-btn" title="Rotate Document"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
                 <button class="view-btn action-btn" title="View Document"><svg viewBox="0 0 24 24" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
                 <button class="remove-btn action-btn" title="Remove Document"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></button>
             `;
@@ -938,19 +970,21 @@
                 renderPDFPreview(fileObject, fileBox.querySelector('canvas'));
             };
 
+            // Removes a file from the state and the DOM
             const removeFileById = (idToRemove) => {
                 const index = filesData.findIndex(f => f.id === idToRemove);
                 if (index > -1) {
                     filesData.splice(index, 1);
-                    const fileBox = elements.fileList.querySelector(.file-box[data-id='${idToRemove}']);
+                    const fileBox = elements.fileList.querySelector(`.file-box[data-id='${idToRemove}']`);
                     if (fileBox) fileBox.remove();
                     updateMergeButtonState();
                     if (filesData.length === 0) resetApp();
                 }
             };
 
+            // Renders the first page of a PDF onto a canvas element
             const renderPDFPreview = async (fileObject, canvas) => {
-                const rotationKey = ${fileObject.file.name}-1;
+                const rotationKey = `${fileObject.file.name}-1`; // Only preview first page
                 const rotation = pageRotations[rotationKey] || 0;
                 try {
                     const arrayBuffer = await fileObject.file.arrayBuffer();
@@ -961,13 +995,14 @@
                     canvas.height = viewport.height; canvas.width = viewport.width;
                     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
                 } catch (e) {
-                    console.error(Preview error for ${fileObject.file.name}:, e);
-                    showMessage(Could not display preview for ${fileObject.file.name}. It might be corrupted.);
+                    console.error(`Preview error for ${fileObject.file.name}:`, e);
+                    showMessage(`Could not display preview for ${fileObject.file.name}. It might be corrupted.`);
                     const p = canvas.nextElementSibling;
                     if (p) p.style.color = 'red';
                 }
             };
 
+            // Updates the filesData array to match the new order in the DOM after drag-and-drop
             const reorderSelectedFiles = () => {
                 filesData = Array.from(elements.fileList.children).map(box => {
                     const id = parseInt(box.dataset.id, 10);
@@ -975,68 +1010,62 @@
                 });
             };
 
+            // --- Core Logic ---
+
+            // Simulates an upload progress bar for better user experience
             const simulateUpload = () => {
                 return new Promise(resolve => {
                     elements.uploadProgressOverlay.style.display = 'flex';
                     let progress = 0;
-                    elements.uploadStatusText.textContent = Processing ${filesData.length} file(s)...;
+                    elements.uploadStatusText.textContent = `Processing ${filesData.length} file(s)...`;
                     elements.uploadFilenameText.textContent = filesData[0].file.name;
                     const interval = setInterval(() => {
                         progress += 1;
-                        elements.uploadProgressBar.style.width = ${progress}%;
-                        elements.uploadPercentage.textContent = ${progress}%;
+                        elements.uploadProgressBar.style.width = `${progress}%`;
+                        elements.uploadPercentage.textContent = `${progress}%`;
                         if (progress >= 100) { clearInterval(interval); setTimeout(() => { elements.uploadProgressOverlay.style.display = 'none'; resolve(); }, 500); }
                     }, 35);
                 });
             };
 
+            // Merges all selected PDFs into a single new PDF
             const mergePdfs = async () => {
                 if (filesData.length < 2) return;
-                await simulateUpload();
+                await simulateUpload(); // Show the simulated progress first
                 showLoader('Merging PDFs...');
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for UX
                 try {
-                    const { PDFDocument, degrees } = window.PDFLib;
-                    const mergedPdf = await PDFDocument.create();
+                    const { PDFDocument } = window.PDFLib; const mergedPdf = await PDFDocument.create();
                     for (const fileObject of filesData) {
                         const arrayBuffer = await fileObject.file.arrayBuffer();
-                        let pdfToMerge;
-                        try {
-                            // PDF-Lib does NOT support password-protected PDFs
-                            pdfToMerge = await PDFDocument.load(arrayBuffer);
-                        } catch (e) {
-                            showMessage(`Could not merge '${fileObject.file.name}'. Password-protected or corrupted.`);
-                            continue;
-                        }
+                        const pdfToMerge = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true, password: fileObject.password });
                         const copiedPages = await mergedPdf.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
                         copiedPages.forEach((page, pageIndex) => {
-                            const rotationKey = `${fileObject.file.name}-${pageIndex + 1}`;
-                            const rotation = pageRotations[rotationKey] || 0;
-                            if (rotation !== 0) page.setRotation(degrees(rotation));
+                            const rotationKey = `${fileObject.file.name}-${pageIndex + 1}`; const rotation = pageRotations[rotationKey] || 0;
+                            if (rotation !== 0) page.setRotation(window.PDFLib.degrees(rotation));
                             mergedPdf.addPage(page);
                         });
                     }
-                    const mergedPdfBytes = await mergedPdf.save();
-                    window.mergedPdfBlob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+                    const mergedPdfBytes = await mergedPdf.save(); window.mergedPdfBlob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
                     showScreen(elements.postMergeScreen);
                 } catch (error) {
                     console.error(error);
-                    showMessage('Merge failed. A file might be corrupted or password-protected.');
-                } finally {
-                    hideLoader();
-                }
+                    showMessage('Merge failed. A file might be corrupted or have an incorrect password.');
+                } finally { hideLoader(); }
             };
 
-            // --- Event Listeners ---
+            // --- Event Listeners Setup ---
             fileInput.addEventListener('change', (e) => addFilesToList(e.target.files));
             elements.selectFilesBtn.addEventListener('click', () => fileInput.click());
             elements.addBtn.addEventListener('click', () => fileInput.click());
             elements.removeAllBtn.addEventListener('click', resetApp);
 
+            // Drag and drop listeners
             elements.dropArea.addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
             elements.dropArea.addEventListener('dragleave', (e) => e.currentTarget.classList.remove('drag-over'));
             elements.dropArea.addEventListener('drop', (e) => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); addFilesToList(e.dataTransfer.files); });
 
+            // Event delegation for action buttons on file boxes
             elements.fileList.addEventListener('click', async (e) => {
                 const target = e.target.closest('button.action-btn'); if (!target) return;
                 const fileBox = target.closest('.file-box'); const fileId = parseInt(fileBox.dataset.id, 10);
@@ -1050,9 +1079,9 @@
                     const fileUrl = URL.createObjectURL(fileObject.file);
 
                     if (isMobile) {
-                        window.open(fileUrl, '_blank');
+                        window.open(fileUrl, '_blank'); // Open in new tab on mobile
                     } else {
-                        if (currentViewerUrl) URL.revokeObjectURL(currentViewerUrl);
+                        if (currentViewerUrl) URL.revokeObjectURL(currentViewerUrl); // Clean up previous URL
                         currentViewerUrl = fileUrl;
                         elements.pdfViewerIframe.src = currentViewerUrl;
                         elements.pdfViewerModal.style.display = 'flex';
@@ -1061,7 +1090,7 @@
                     showLoader('Rotating...');
                     try {
                         const pdf = await pdfjsLib.getDocument({ data: await fileObject.file.arrayBuffer(), password: fileObject.password }).promise;
-                        for (let i = 1; i <= pdf.numPages; i++) { pageRotations[${fileObject.file.name}-${i}] = ((pageRotations[${fileObject.file.name}-${i}] || 0) + 90) % 360; }
+                        for (let i = 1; i <= pdf.numPages; i++) { pageRotations[`${fileObject.file.name}-${i}`] = ((pageRotations[`${fileObject.file.name}-${i}`] || 0) + 90) % 360; }
                         await renderPDFPreview(fileObject, fileBox.querySelector('canvas'));
                     } catch (err) {
                         showMessage("Couldn't rotate file.");
@@ -1071,6 +1100,7 @@
                 }
             });
 
+            // Close the PDF viewer modal
             elements.pdfViewerClose.addEventListener('click', () => {
                 elements.pdfViewerModal.style.display = 'none';
                 elements.pdfViewerIframe.src = '';
@@ -1080,6 +1110,7 @@
                 }
             });
 
+            // Merge and post-merge screen actions
             [elements.mergeBtn, elements.mergeBtnMobile].forEach(btn => btn.addEventListener('click', mergePdfs));
             elements.downloadBtn.addEventListener('click', () => {
                 if (window.mergedPdfBlob) {
@@ -1089,6 +1120,7 @@
             });
             [elements.backArrowBtn, elements.deleteBtn].forEach(btn => btn.addEventListener('click', resetApp));
 
+            // Mobile side panel controls
             const toggleRightPanel = (forceClose = false) => {
                 const isOpen = elements.rightPanel.classList.contains('open');
                 if (forceClose || isOpen) { elements.rightPanel.classList.remove('open'); elements.rightPanelOverlay.classList.remove('active'); }
@@ -1100,15 +1132,17 @@
             elements.rightPanelOverlay.addEventListener('click', () => toggleRightPanel(true));
             window.addEventListener('resize', updateMergeButtonState);
 
+            // Initialize SortableJS for drag-and-drop reordering
             new Sortable(elements.fileList, {
                 animation: 150,
                 ghostClass: 'sortable-ghost',
                 chosenClass: 'sortable-chosen',
-                filter: '.action-btn',
+                filter: '.action-btn', // Ignore clicks on action buttons for dragging
                 preventOnFilter: false,
-                onEnd: reorderSelectedFiles
+                onEnd: reorderSelectedFiles // Update data array on reorder
             });
 
+            // Initial setup
             showScreen(elements.initialScreen);
         });
     </script>
